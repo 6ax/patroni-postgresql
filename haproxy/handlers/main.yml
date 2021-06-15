@@ -1,0 +1,27 @@
+# SPDX-FileCopyrightText: 2020 Helmholtz Centre for Environmental Research (UFZ)
+# SPDX-FileCopyrightText: 2020 Helmholtz-Zentrum Dresden-Rossendorf (HZDR)
+#
+# SPDX-License-Identifier: Apache-2.0
+
+---
+
+- name: Check HAProxy configuration file
+  command:
+    cmd: "{{ haproxy_executable_path }} -c -q -f {{ haproxy_conf_file_path }}"
+  register: check_haproxy_config
+  changed_when: check_haproxy_config.rc != 0
+  failed_when: check_haproxy_config.rc != 0
+
+- name: Restart HAProxy
+  become: yes
+  service:
+    name: "{{ haproxy_name }}"
+    state: restarted
+
+- name: Reload HAProxy
+  become: yes
+  service:
+    name: "{{ haproxy_name }}"
+    state: reloaded
+
+...

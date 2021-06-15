@@ -1,0 +1,21 @@
+# SPDX-FileCopyrightText: 2020 Helmholtz Centre for Environmental Research (UFZ)
+# SPDX-FileCopyrightText: 2020 Helmholtz-Zentrum Dresden-Rossendorf (HZDR)
+#
+# SPDX-License-Identifier: Apache-2.0
+
+---
+- name: Restart Keepalived
+  become: yes
+  service:
+    name: keepalived
+    state: restarted
+    daemon_reload: yes
+
+- name: Reload Keepalived
+  become: yes
+  service:
+    name: keepalived
+    state: reloaded
+    daemon_reload: yes
+
+...

@@ -1,0 +1,157 @@
+# SPDX-FileCopyrightText: 2020 Helmholtz Centre for Environmental Research (UFZ)
+# SPDX-FileCopyrightText: 2020 Helmholtz-Zentrum Dresden-Rossendorf (HZDR)
+#
+# SPDX-License-Identifier: Apache-2.0
+
+---
+- name: Check that all mandatory variables are defined.
+  assert:
+    that:
+      - keepalived_unicast_peers is defined
+      - keepalived_virtual_ip_address is defined or keepalived_virtual_ipaddress_configs is defined
+    fail_msg: "Some mandatory variables are not set."
+    success_msg: "All mandatory variables are set."
+
+- name: Install dependencies for Keepalived.
+  become: yes
+  package:
+    name: "{{ keepalived_dependencies }}"
+    state: present
+    update_cache: yes
+
+- name: Create Keepalived Configuration Directory.
+  become: yes
+  file:
+    path: "{{ keepalived_conf_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Check whether Keepalived binary is installed.
+  stat:
+    path: "{{ keepalived_executable_path }}"
+  register: keepalived_installed
+
+- name: Get Keepalived version.
+  command:
+    cmd: "{{ keepalived_executable_path }} --version"
+  register: keepalived_version_installed
+  when: keepalived_installed.stat.exists
+  changed_when: false
+  check_mode: no
+
+- name: Put value of installed version into an Ansible fact.
+  set_fact:
+    installed_keepalived_version: "{{ keepalived_version_installed.stderr | regex_search('^Keepalived v(\\d+\\.\\d+\\.\\d+)', '\\1') | first }}"
+  when: keepalived_installed.stat.exists
+
+- name: Output version strings of installed and to be installed Keepalived.
+  debug:
+    msg: "Installed version: {{ installed_keepalived_version }}, version to be installed: {{ keepalived_version }}."
+  when: installed_keepalived_version is defined
+
+- name: Check if both version strings are equal.
+  set_fact:
+    is_keepalived_version_equal: "{{ installed_keepalived_version is version(keepalived_version, operator='==', strict=True) }}"
+  when: keepalived_installed.stat.exists
+
+- name: Continue with installing Keepalived if Keepalived is not already installed or versions are not equal.
+  when: not keepalived_installed.stat.exists or not is_keepalived_version_equal
+  block:
+
+    - name: Create temporary Keepalived build directory.
+      become: yes
+      ansible.builtin.tempfile:
+        state: directory
+        prefix: "keepalived-{{ keepalived_version }}_"
+      register: tempdir
+      check_mode: no
+
+    - name: Store temporary build directory path
+      set_fact:
+        keepalived_build_dir: "{{ tempdir.path }}"
+
+    - name: Download and extract keepalived archive.
+      become: yes
+      unarchive:
+        src: "{{ keepalived_download_url }}"
+        dest: "{{ keepalived_build_dir }}"
+        remote_src: yes
+        extra_opts:
+          - "--strip-components=1"
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Configure Keepalived to be build.
+      become: yes
+      command: "./configure"
+      args:
+        chdir: "{{ keepalived_build_dir }}"
+
+    - name: Build Keepalived from source.
+      become: yes
+      make:
+        chdir: "{{ keepalived_build_dir }}"
+
+    - name: Install Keepalived binaries.
+      become: yes
+      make:
+        chdir: "{{ keepalived_build_dir }}"
+        target: install
+      notify: Restart Keepalived
+
+    - name: Copy Keepalived sysconfig file
+      become: yes
+      copy:
+        src: "{{ keepalived_build_dir }}/keepalived/etc/sysconfig/keepalived"
+        dest: "{{ keepalived_sysconfig_file_path }}"
+        owner: root
+        group: root
+        mode: '0644'
+        remote_src: yes
+      when: not ansible_check_mode
+  always:
+    - name: Remove temporary build directory
+      become: yes
+      file:
+        path: "{{ keepalived_build_dir }}"
+        state: absent
+      check_mode: no
+
+- name: Create Configuration File.
+  become: yes
+  template:
+    src: "{{ keepalived_conf_template }}"
+    dest: "{{ keepalived_conf_file_path }}"
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Reload Keepalived
+
+- name: Verify Keepalived configuration.
+  become: yes
+  command:
+    cmd: "{{ keepalived_executable_path | quote }} --config-test {{ keepalived_conf_file_path | quote }}"
+  register: config_check
+  changed_when: config_check.rc != 0
+
+- name: Create Keepalived Service Unit File.
+  template:
+    src: "{{ keepalived_service_template }}"
+    dest: "{{ keepalived_service_file_path }}"
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Restart Keepalived
+
+- name: Start Keepalived Systemd Service.
+  become: yes
+  service:
+    name: keepalived
+    state: started
+    enabled: yes
+    daemon_reload: yes
+
+...

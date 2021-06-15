@@ -1,0 +1,38 @@
+global
+    # global settings here
+    maxconn 50000
+    log {{ haproxy_log_socket }} local0 {{ haproxy_log_level }}
+    user {{ haproxy_user }}
+    group {{ haproxy_group }}
+    daemon
+    stats socket {{ haproxy_socket }} user {{ haproxy_user }} group {{ haproxy_group }} mode 660 level admin
+    nbproc {{ haproxy_nbproc }}
+    nbthread {{ haproxy_nbthread }}
+    cpu-map {{ haproxy_cpumap }}
+
+defaults
+    log global
+    mode tcp
+    retries 2
+    timeout client 30m
+    timeout connect 4s
+    timeout server 30m
+    timeout check 5s
+
+frontend haproxy_stats
+    mode http
+    bind  *:9000 ssl crt {{ haproxy_ssl_certificate_chain_file }} alpn h2,http1.1
+    stats {{ haproxy_stats_enable }}
+    stats uri /stats
+    stats hide-version
+    stats auth {{ haproxy_stats_admin_user }}:{{ haproxy_stats_admin_user_password }}
+    stats admin if TRUE
+
+listen production
+    bind 0.0.0.0:5000
+    option httpchk OPTIONS/master
+    http-check expect status 200
+    default-server inter 3s fall 3 rise 2 on-marked-down shutdown-sessions
+{% for host in ansible_play_hosts  %}
+    server {{ hostvars[host].inventory_hostname }} {{ hostvars[host].ansible_eth1.ipv4.address }}:5432 maxconn 100 check port 8008
+{% endfor %}
